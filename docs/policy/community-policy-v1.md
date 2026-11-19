@@ -1,12 +1,13 @@
-# ContentGuard — Community Content Policy v1.0
+# ContentGuard — Community Content Policy v1.0 (Draft Revision 2)
 
-**Document ID:** CG-POL-001  
-**Version:** 1.0  
-**Status:** Draft  
-**Project:** ContentGuard  
-**Document Type:** Community Moderation Policy  
-**Owner:** Requirements Engineering Team  
-**Created:** 2026-11-17  
+**Document ID:** CG-POL-001
+**Version:** 1.0-draft.2
+**Status:** Draft — Cross-review pending
+**Project:** ContentGuard
+**Document Type:** Community Moderation Policy
+**Owner:** Requirements Engineering Team
+**Created:** 2026-11-17
+**Last revised:** 2026-11-19
 **Related Requirements:** REQ-INV-001–005, REQ-FUN-001–007, REQ-SEC-001–005, REQ-QUA-001–003
 
 ---
@@ -295,13 +296,14 @@ The system must not treat an AI model's unsupported assessment as proof that a f
 
 # 3. Severity Classification
 
-ContentGuard uses three severity levels.
+ContentGuard uses three severity levels. The following canonical severity and routing rules supersede any illustrative enforcement guidance in §2. If a category's guidance mentions warning, hide/remove, posting restrictions, or account sanctions, those are future or manual guidance only under §5; they are not automated MVP outcomes.
 
-| Level | Name | Description | Default handling |
+| Severity | Canonical level | Description | Default policy route |
 |---|---|---|---|
-| S1 | Low | Minor or ambiguous policy concern | Allow, warn, or review |
-| S2 | Medium | Clear violation with moderate community impact | Restrict or remove; review where needed |
-| S3 | High | Serious harm, credible threats, exploitation, or significant safety risk | Human escalation and protective handling |
+| S1 | `low` | Minor policy concern with complete context | `approve` only when context is complete and no mandatory safety rule applies |
+| S2 | `medium` | Policy concern with moderate community impact | `reject` if sufficient validated evidence supports a deterministic authorization; otherwise `escalate` when contextual judgment is required |
+| S3 | `high` | Serious harm, threats, exploitation, or significant safety risk | Mandatory `escalate`; no final disposition until human review |
+| Analysis/grounding failure | `n/a` | Analysis, grounding, or safe recovery cannot complete reliably | `hold`; never claim confirmed queue placement before durable persistence |
 
 ## 3.1 Severity Assessment Factors
 
@@ -317,16 +319,29 @@ The severity level should be determined using the following factors:
 
 No single keyword should independently determine the final severity.
 
+**Classification precedence and context rules:**
+
+- S3/high severity overrides lower-severity routing.
+- Where multiple categories match, retain all matched categories as evidence and route according to the highest applicable severity.
+- Do not assume missing context. If information needed for a reliable contextual determination is unavailable, route to `escalate`; if the analysis or grounding process itself fails, use `hold` under the fail-safe rule.
+- Contextual exceptions cannot override mandatory safety rules or required human review.
+- AI-generated categories, confidence, and severity are advisory evidence, not independent disposition authority.
+
 ## 3.2 Severity Escalation
 
-The system should escalate a case when:
+The system MUST route a case to human review when any of these operational triggers is established:
 
-- A credible threat is detected.
-- The content involves possible exploitation of minors.
-- Multiple violations occur together.
-- The context is insufficient to distinguish harmful intent from legitimate discussion.
-- AI confidence is insufficient for a safe automated recommendation.
-- A high-severity violation is suspected regardless of the model's ordinary classification.
+- Expressed intent to cause harm involving an identifiable target.
+- A harmful or threatening expression that also contains at least one operational element: method, time, location, capability, or preparatory behavior.
+- Content involving suspected sexual exploitation of minors.
+- Material conflict between AI analysis and the deterministic pre-filter.
+- Missing conversation history or context required to assess intent or apply a contextual exception reliably.
+- Inability to reliably distinguish a legitimate contextual exception from genuine harm.
+- An S3/high-severity violation is suspected, irrespective of an AI model's ordinary recommendation.
+
+These are **review-routing triggers**, not final findings about illegality, factual authenticity, or the truth of an accusation. They introduce no unapproved numerical confidence thresholds. Multiple violations must retain their categories and follow the highest-severity rule; multiple-category matching alone does not automatically raise severity.
+
+Where AI analysis, grounding, or recovery fails operationally, use `hold` rather than asserting completed escalation. A human-review queue entry is confirmed only after the atomic persistence requirements in §4.3 are satisfied.
 
 ---
 
@@ -334,16 +349,16 @@ The system should escalate a case when:
 
 ## 4.1 Available Outcomes
 
-ContentGuard defines four primary moderation outcomes.
+The policy-facing terms below map to the architecture's canonical case outcomes:
 
-| Outcome | Meaning |
-|---|---|
-| ALLOW | Content is permitted under the applicable policy |
-| FLAG | Content is identified for further assessment |
-| HOLD | Content is retained pending human review or safe recovery |
-| REJECT | Content is not permitted under the applicable policy |
+| Policy term | Architecture outcome | Meaning |
+|---|---|---|
+| `ALLOW` | `approve` | Confirmed local case state permitting content under the applicable policy |
+| `FLAG` | `escalate` | Persisted placement in the human-review queue; not a final disposition |
+| `HOLD` | `hold` | Safe local retention after analysis, grounding, or recovery failure |
+| `REJECT` | `reject` | Local rejection authorized by the deterministic policy engine |
 
-The system must distinguish an AI recommendation from an authorized moderation decision.
+`FLAG` is not a cosmetic marker: it requires a durably committed human-review queue entry. `escalate` is pending review, not a final determination. AI output is **advisory evidence only**; it never independently authorizes a case-state transition. S3/high-severity content cannot receive automated `approve` or final `reject` before human review. A local `reject` is not an external-platform removal. Failed or unconfirmed writes must never be described as confirmed outcomes.
 
 ## 4.2 Decision Responsibilities
 
@@ -381,75 +396,94 @@ Human moderators are responsible for:
 
 ## 4.3 Decision Flow
 
-1. User submits content.
-2. Intake component validates the submission.
-3. AI analysis evaluates the content against this policy.
-4. The policy engine checks the AI output and mandatory safety rules.
-5. The system assigns an authorized outcome.
-6. High-risk or uncertain content is routed to human review.
-7. The decision and supporting evidence are recorded in the audit subsystem.
+1. User submits content; intake validates the request and its authenticated actor, idempotency key, and payload identity.
+2. AI analysis supplies advisory evidence; a deterministic pre-filter and policy engine evaluate mandatory safety rules and routing constraints.
+3. The policy boundary authorizes a local `approve`, `hold`, `reject`, or `escalate` transition as permitted by §§3 and 4.1.
+4. An `escalate` transition requires a corresponding human-review queue entry.
+5. Case state, any required queue entry, and exactly one audit record for the logical transition commit atomically before a confirmed outcome is returned.
+6. Human moderators review escalated cases, with subsequent authorized transitions independently attributable and audited.
 
-If AI analysis fails, times out, or returns an invalid response, the system must place the affected content into the appropriate safe review or recovery state.
+**Atomic commit and uncertain outcomes:**
 
-It must not automatically approve or reject content because of an AI failure.
+A moderation outcome is confirmed only after the case state, any required human-review queue entry, and exactly one audit record commit atomically.
+
+If any required write fails, the transaction is rolled back and the API reports `failed` or `pending_unconfirmed`. It must not claim a confirmed disposition or confirmed queue placement.
+
+If an acknowledgement is lost, the system reconciles the existing logical request using the authenticated actor, idempotency key and payload identity before retrying. A retry must not create a duplicate case, queue entry, audit record or external effect. Reuse of an idempotency key with a different payload identity must not silently overwrite the original request.
+
+If AI analysis fails, times out, or returns an invalid response, the case follows the safe `hold` route; the system must not automatically approve or reject it, nor claim review-queue placement without successful persistence. Any unconfirmed commit is reconciled before returning a confirmed status.
 
 ---
 
 # 5. Enforcement Actions
 
-ContentGuard supports the following enforcement actions.
+## 5.1 MVP Local Capabilities
 
-| Action | Description | Appropriate circumstances |
+The MVP supports **only** these local moderation capabilities:
+
+- Local case state: `approve`, `hold`, `reject`, or `escalate`.
+- Persisted human-review queue entries for `escalate`.
+- Audit records for authorized local transitions.
+
+These outcomes do not automatically change the visibility, posting permissions, or account status of any external platform. In particular, local `reject` does not remove external content, and local `escalate` denotes persisted review routing rather than a warning or final enforcement action.
+
+## 5.2 Future or Manual Enforcement Guidance (Not MVP Automation)
+
+| Action | Scope | Policy guidance (not an implemented external effect) |
 |---|---|---|
-| Allow | Permit content to remain visible | No actionable violation |
-| Warning | Notify the user of a policy concern | Minor or first-time violations |
-| Flag | Mark content for additional assessment | Uncertain or potentially harmful content |
-| Hold | Retain content pending review | AI failure or unresolved safety concern |
-| Hide | Temporarily restrict public visibility | Suspected violations requiring review |
-| Remove | Remove content from public access | Confirmed policy violations |
-| Temporary restriction | Temporarily limit account capabilities | Repeated or serious violations |
-| Account suspension | Temporarily suspend account access | Serious or repeated violations, subject to authorization |
+| Warning notification | Future/manual | Notify users of minor or first-time concerns only when separately authorized |
+| Hide/remove external-platform content | Future/manual | Consider after an authorized decision and approved integration |
+| Posting restriction | Future/manual | Consider for repeated or serious violations after authorization |
+| Account suspension | Future/manual | Consider for serious or repeated violations after authorization |
+| Any other external-platform modification | Future/manual | Requires explicit scope and governance approval |
 
-The system must not automatically apply account-level sanctions solely on the basis of an unverified AI prediction.
+The illustrative enforcement guidance in §2 and any prospective restoration/restriction reversal in §7 are **not claims of implemented MVP automation**. External effects require a new scope decision **and an approved ADR** before implementation. The system must not automatically apply account-level sanctions on the basis of unverified AI predictions.
 
-Every consequential action must have:
+Every consequential local transition must record:
 
-- A policy identifier.
-- A decision identifier.
-- A responsible actor.
-- A decision timestamp.
-- A recorded rationale.
+- A policy identifier and decision identifier.
+- An authenticated actor or authorized system/policy principal.
+- A decision timestamp and recorded rationale.
 - A reference to supporting evidence.
+- An audit record committed in accordance with §4.3.
 
 ---
 
 # 6. Contextual Exceptions
 
-ContentGuard must consider legitimate uses of language that may superficially resemble policy violations.
-
-The following contexts require special consideration:
+ContentGuard must consider legitimate uses of language that may superficially resemble policy violations. Context is **not** a blanket exemption, and exceptions never override mandatory safety rules.
 
 ## 6.1 Educational and Academic Discussion
 
-Content discussing hate speech, violence, harassment, or discrimination for educational or research purposes should not automatically be classified as a violation.
+Content discussing hate speech, violence, harassment, or discrimination for educational or research purposes should not automatically be classified as a violation. A research label does not excuse advocacy of real harm.
 
 ## 6.2 News and Public Interest Reporting
 
-Reporting harmful incidents, quoting public statements, or discussing current events may contain offensive or threatening expressions without endorsing them.
+Reporting harmful incidents, quoting public statements, or discussing current events may contain offensive or threatening expressions without endorsing them. Explicit endorsement of threats is not exempt.
 
 ## 6.3 Satire and Fiction
 
-Fictional characters, jokes, parody, and role-play should be assessed according to their context and likely real-world impact.
+Fictional characters, jokes, parody, and role-play should be assessed according to context and likely real-world impact. Fictional framing does not exempt a specific threat targeting a real person.
 
 ## 6.4 Counterspeech
 
-Users criticizing, documenting, or opposing abusive content should not be penalized merely for quoting it.
+Users criticizing, documenting, or opposing abusive content should not be penalized merely for quoting it. Repeating an insult without opposing context is evaluated normally.
 
 ## 6.5 Ambiguous Language
 
-When intent cannot be reliably established, the system should prefer contextual assessment and human review over an unsupported definitive judgment.
+When intent cannot be reliably established because relevant contextual evidence is missing, use `escalate` rather than an unsupported definitive judgment. If analysis or grounding itself fails, use `hold` (§§3.2, 4.3).
 
-These exceptions do not override mandatory safety invariants.
+## 6.6 Testable Contextual Cases
+
+| Context | Permitted example | Non-exempt example | Expected route |
+|---|---|---|---|
+| Educational | Analysis of hateful statements that explicitly condemns them | Invoking "research" to encourage attacks on a group | Former may `approve` if context is complete and no mandatory rule applies; latter follows severity routing |
+| News | Neutral quotation with clearly attributed reporting context | Reposting a threat while expressing support for it | Former may `approve`; latter `escalate` |
+| Satire/fiction | Clearly fictional expression without a real-world target | A specific threat toward an identifiable real person | Former is evaluated in context; latter `escalate` |
+| Counterspeech | Quoting abuse to explicitly oppose it | Repeating abuse without oppositional context | Former may `approve`; latter follows category and severity rules |
+| Ambiguous | Evidence is insufficient to determine intent | Assuming either safety or a violation without evidence | `escalate` (or `hold` if analysis/grounding fails) |
+
+The examples above define policy expectations for deterministic positive, negative, and ambiguous tests. Evaluation-corpus coverage is maintained separately under its approved test plan and REQ-QUA-003. A contextual exception may support `approve` only if required context is present and no mandatory safety rule applies. These exceptions do not override mandatory safety invariants.
 
 ---
 
@@ -499,17 +533,17 @@ The audit record should contain:
 | decision_id | Unique decision identifier |
 | content_id | Associated content identifier |
 | policy_id | Applicable policy rule |
-| violation_category | Identified violation category |
+| violation_category | All applicable violation categories, retained when more than one matches |
 | severity | S1, S2, or S3 |
 | ai_recommendation | AI-generated recommendation |
-| policy_decision | Final authorized outcome |
-| decision_actor | AI analysis, policy engine, or human moderator |
+| policy_decision | Authorized canonical local outcome (`approve`, `hold`, `reject`, or `escalate`); `escalate` is pending review, not a final disposition |
+| decision_actor | Authenticated actor or system/policy principal responsible for the authorized transition; AI analysis is recorded separately as advisory evidence and is never the decision authority |
 | decision_reason | Explanation of the decision |
 | evidence_reference | Reference to supporting evidence |
 | timestamp | Decision time |
 | review_status | Pending, reviewed, confirmed, or reversed |
 
-The audit subsystem must preserve the relationship between the original recommendation, the authorized decision, and subsequent human review.
+The audit subsystem must preserve the relationship between advisory AI analysis, the authoritative policy revision and state, the authorized transition, and subsequent human review. Linked replay identity and payload-binding evidence must be available for reconciliation without unnecessarily duplicating raw identifiers in audit records;only committed transitions may be described as confirmed. Every logical transition requires exactly one committed audit record under §4.3.
 
 Sensitive personal information should not be unnecessarily duplicated in audit records.
 
@@ -551,7 +585,7 @@ The following acceptance criteria are proposed for the initial implementation.
 |---|---|---|
 | PC-001 | Each supported content category has a unique policy identifier | Policy schema validation |
 | PC-002 | Each policy category defines its scope, examples, severity, and enforcement guidance | Policy completeness test |
-| PC-003 | Equivalent fixed test cases produce consistent category and severity outputs | Deterministic regression test |
+| PC-003 | The deterministic policy boundary produces the same outcome and reason for the same complete validated input, authoritative state and policy revision | Deterministic policy regression test |
 | PC-004 | Contextual exceptions are not automatically treated as violations | Negative test fixtures |
 | PC-005 | AI output cannot directly invoke enforcement actions | Structural boundary test |
 | PC-006 | High-severity cases are routed to human review | Severity-routing test |
@@ -560,7 +594,7 @@ The following acceptance criteria are proposed for the initial implementation.
 | PC-009 | A human moderator can review and record a decision correction | Review workflow integration test |
 | PC-010 | Policy and prompt revisions are evaluated against a fixed test corpus | Semantic evaluation gate |
 
-These criteria define the initial policy verification scope. Quantitative model-accuracy and latency thresholds must be taken from the approved requirements registry and evaluation plan rather than invented by this policy document.
+These criteria define the initial policy verification scope. LLM classification quality is evaluated separately against a fixed corpus under REQ-QUA-003; repeated LLM output is not evidence of deterministic policy-engine behavior. Quantitative model-accuracy and latency thresholds must be taken from the approved requirements registry and evaluation plan rather than invented by this policy document.
 
 ---
 
@@ -587,6 +621,7 @@ This document follows a version-controlled revision process.
 | Version | Date | Changes | Status |
 |---|---|---|---|
 | 1.0 | 2026-11-17 | Initial policy categories, severity levels, decision framework, enforcement guidance, and audit requirements | Draft |
+| 1.0-draft.2 | 2026-11-19 | Aligned outcomes and severity routing with ADR-001; clarified MVP boundaries, atomic commit semantics, contextual examples, escalation criteria and deterministic-policy scope following Issue #48 review | Draft — cross-review pending |
 | 1.1 | TBD | Incorporate initial user interview findings | Planned |
 | 2.0 | TBD | Revise policy based on user feedback, moderation evaluation, and team review | Planned |
 
